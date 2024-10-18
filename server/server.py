@@ -13,17 +13,21 @@ import kivy.uix.label
 import kivy.uix.textinput
 import kivy.uix.boxlayout
 
+import pandas as pd
+import random
 
-class UI(kivy.app.App):
+
+class ServerApp(kivy.app.App):
     def __init__(self):
         super().__init__()
-        self.create_socket_button = kivy.uix.button.Button(text="Create Socket", disabled=False)
         self.server_ip = kivy.uix.textinput.TextInput(hint_text="IPv4 Address", text="localhost")
         self.server_port = kivy.uix.textinput.TextInput(hint_text="Port Number", text="10000")
         self.server_socket_box_layout = kivy.uix.boxlayout.BoxLayout(orientation="horizontal")
-        self.bind_button = kivy.uix.button.Button(text="Bind Socket", disabled=True)
+
+        self.bind_button = kivy.uix.button.Button(text="Bind Socket", disabled=False)
         self.listen_button = kivy.uix.button.Button(text="Listen to Connections", disabled=True)
-        self.close_socket_button = kivy.uix.button.Button(text="Close Socket", disabled=True)
+
+        self.close_socket_button = kivy.uix.button.Button(text="Close Socket", disabled=False)
         self.label = kivy.uix.label.Label(text="Socket Status")
         self.box_layout = kivy.uix.boxlayout.BoxLayout(orientation="vertical")
 
@@ -34,7 +38,6 @@ class UI(kivy.app.App):
     def create_socket(self, *args):
         self.label.text = "Socket Created"
 
-        self.create_socket_button.disabled = True
         self.bind_button.disabled = False
         self.close_socket_button.disabled = False
 
@@ -57,14 +60,11 @@ class UI(kivy.app.App):
         self._socket.close()
         self.label.text = "Socket Closed"
 
-        self.create_socket_button.disabled = False
         self.bind_button.disabled = True
         self.listen_button.disabled = True
         self.close_socket_button.disabled = True
 
     def build(self):
-        self.create_socket_button.bind(on_press=self.create_socket)
-
         self.server_socket_box_layout.add_widget(self.server_ip)
         self.server_socket_box_layout.add_widget(self.server_port)
 
@@ -74,7 +74,6 @@ class UI(kivy.app.App):
 
         self.close_socket_button.bind(on_press=self.close_socket)
 
-        self.box_layout.add_widget(self.create_socket_button)
         self.box_layout.add_widget(self.server_socket_box_layout)
         self.box_layout.add_widget(self.bind_button)
         self.box_layout.add_widget(self.listen_button)
@@ -86,28 +85,16 @@ class UI(kivy.app.App):
 
 model = None
 
-# Preparing the NumPy array of the inputs.
-data_inputs = numpy.array([[1, 1],
-                           [1, 0],
-                           [0, 1],
-                           [0, 0]])
+num_classes = 1
+num_inputs = 16
 
-# Preparing the NumPy array of the outputs.
-data_outputs = numpy.array([0, 
-                            1, 
-                            1, 
-                            0])
-
-num_classes = 2
-num_inputs = 2
-
-num_solutions = 6
+num_solutions = 20
 GANN_instance = pygad.gann.GANN(num_solutions=num_solutions,
                                 num_neurons_input=num_inputs,
-                                num_neurons_hidden_layers=[2],
+                                num_neurons_hidden_layers=[32, 16, 10, 6, 3],
                                 num_neurons_output=num_classes,
-                                hidden_activations=["relu"],
-                                output_activation="softmax")
+                                hidden_activations=["relu", "relu", "relu", "relu", "relu"],
+                                output_activation="sigmoid")
 
 
 class SocketThread(threading.Thread):
@@ -150,7 +137,9 @@ class SocketThread(threading.Thread):
                     if len(received_data) > 0:
                         try:
                             # Decoding the data (bytes).
+                            print("aaaaaaaaaaaa")
                             received_data = pickle.loads(received_data)
+                            print("aaaaaaaaaaaa")
                             # Returning the decoded data.
                             return received_data, 1
 
@@ -171,12 +160,28 @@ class SocketThread(threading.Thread):
         model_weights = pygad.nn.layers_weights(last_layer=model, initial=False)
         other_model_weights = pygad.nn.layers_weights(last_layer=other_model, initial=False)
 
-        new_weights = numpy.array(model_weights + other_model_weights)/2
+        print(type(model_weights))
+        print(type(model_weights[0]))
+
+        new_weights = []
+        for i in range(len(model_weights)):
+            new_weights.append((model_weights[i] + other_model_weights[i]) / 2)
+        # new_weights = []
+        # for  in
+        # new_weights = numpy.array(model_weights + other_model_weights)/2
 
         pygad.nn.update_layers_trained_weights(last_layer=model, final_weights=new_weights)
 
     def reply(self, received_data):
-        global GANN_instance, data_inputs, data_outputs, model
+        global GANN_instance, data_df, model
+        # id_lst = list(range(data.shape[0]))
+        # random.shuffle(id_lst)
+        print(data_df)
+        print(type(data_df))
+        data_inputs = data_df[:, :-1].copy()
+        data_outputs = data_df[:, -1].copy()
+        print(data_inputs)
+
         if (type(received_data) is dict):
             if (("data" in received_data.keys()) and ("subject" in received_data.keys())):
                 subject = received_data["subject"]
@@ -211,7 +216,7 @@ class SocketThread(threading.Thread):
                             model = best_model
                         else:
                             predictions = pygad.nn.predict(last_layer=model, data_inputs=data_inputs)
-    
+
                             error = numpy.sum(numpy.abs(predictions - data_outputs))
     
                             # In case a client sent a model to the server despite that the model error is 0.0. In this case, no need to make changes in the model.
@@ -304,6 +309,22 @@ class ListenThread(threading.Thread):
                 break
 
 
-serverApp = UI()
-serverApp.title = "Server App"
-serverApp.run()
+df = pd.read_csv("./data/data.csv")
+print(df)
+
+data_df = df.to_numpy()
+# Preparing the NumPy array of the inputs.
+# data_inputs = numpy.array([[1, 1],
+#                            [1, 0],
+#                            [0, 1],
+#                            [0, 0]])
+
+# Preparing the NumPy array of the outputs.
+# data_outputs = numpy.array([0,
+#                             1,
+#                             1,
+#                             0])
+
+server_app = ServerApp()
+server_app.title = "Server Application"
+server_app.run()
