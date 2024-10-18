@@ -16,6 +16,10 @@ import kivy.uix.boxlayout
 import pandas as pd
 import random
 
+from tensorflow import keras
+from keras.models import Sequential
+from keras.layers import Input, Dense, Dropout
+
 
 class ServerApp(kivy.app.App):
     def __init__(self):
@@ -83,18 +87,18 @@ class ServerApp(kivy.app.App):
         return self.box_layout
 
 
-model = None
-
-num_classes = 1
-num_inputs = 16
-
-num_solutions = 20
-GANN_instance = pygad.gann.GANN(num_solutions=num_solutions,
-                                num_neurons_input=num_inputs,
-                                num_neurons_hidden_layers=[32, 16, 10, 6, 3],
-                                num_neurons_output=num_classes,
-                                hidden_activations=["relu", "relu", "relu", "relu", "relu"],
-                                output_activation="sigmoid")
+# model = None
+#
+# num_classes = 1
+# num_inputs = 16
+#
+# num_solutions = 20
+# GANN_instance = pygad.gann.GANN(num_solutions=num_solutions,
+#                                 num_neurons_input=num_inputs,
+#                                 num_neurons_hidden_layers=[32, 16, 10, 6, 3],
+#                                 num_neurons_output=num_classes,
+#                                 hidden_activations=["relu", "relu", "relu", "relu", "relu"],
+#                                 output_activation="sigmoid")
 
 
 class SocketThread(threading.Thread):
@@ -117,11 +121,8 @@ class SocketThread(threading.Thread):
 
                 try:
                     pickle.loads(received_data)
-                    # If the previous pickle.loads() statement is passed, this means all the data is received.
-                    # Thus, no need to continue the loop. The flag all_data_received_flag is set to True to signal all data is received.
                     all_data_received_flag = True
                 except BaseException:
-                    # An exception is expected when the data is not 100% received.
                     pass
 
                 if data == b'': # Nothing received from the client.
@@ -136,11 +137,7 @@ class SocketThread(threading.Thread):
 
                     if len(received_data) > 0:
                         try:
-                            # Decoding the data (bytes).
-                            print("aaaaaaaaaaaa")
                             received_data = pickle.loads(received_data)
-                            print("aaaaaaaaaaaa")
-                            # Returning the decoded data.
                             return received_data, 1
 
                         except BaseException as e:
@@ -148,7 +145,6 @@ class SocketThread(threading.Thread):
                             self.kivy_app.label.text = "Error Decoding the Client's Data"
                             return None, 0
                 else:
-                    # In case data are received from the client, update the recv_start_time to the current time to reset the timeout counter.
                     self.recv_start_time = time.time()
 
             except BaseException as e:
@@ -157,33 +153,42 @@ class SocketThread(threading.Thread):
                 return None, 0
 
     def model_averaging(self, model, other_model):
-        model_weights = pygad.nn.layers_weights(last_layer=model, initial=False)
-        other_model_weights = pygad.nn.layers_weights(last_layer=other_model, initial=False)
+        current_weights = model.get_weights()
+        new_weights = other_model.get_weights()
+        #
+        # average_weights = (current_weights + new_weights) / 2
+        # for i in range(len(new_weights)):
+        #     average_weights.append((current_weights[i] + new_weights[i]) / 2)
 
-        print(type(model_weights))
-        print(type(model_weights[0]))
+        saved_weights = [current_weights, new_weights]
+        mean_weights = list()
+        for weights_list_tuple in zip(*saved_weights):
+            mean_weights.append(
+                numpy.array([numpy.array(w).mean(axis=0) for w in zip(*weights_list_tuple)]))
+        model.set_weights(mean_weights)
 
-        new_weights = []
-        for i in range(len(model_weights)):
-            new_weights.append((model_weights[i] + other_model_weights[i]) / 2)
+        #model.load_weights(average_weights)
+        pass
+        # model_weights = pygad.nn.layers_weights(last_layer=model, initial=False)
+        # other_model_weights = pygad.nn.layers_weights(last_layer=other_model, initial=False)
+        #
+        # print(type(model_weights))
+        # print(type(model_weights[0]))
+        #
         # new_weights = []
-        # for  in
-        # new_weights = numpy.array(model_weights + other_model_weights)/2
-
-        pygad.nn.update_layers_trained_weights(last_layer=model, final_weights=new_weights)
+        # for i in range(len(model_weights)):
+        #     new_weights.append((model_weights[i] + other_model_weights[i]) / 2)
+        #
+        # pygad.nn.update_layers_trained_weights(last_layer=model, final_weights=new_weights)
 
     def reply(self, received_data):
         global GANN_instance, data_df, model
-        # id_lst = list(range(data.shape[0]))
-        # random.shuffle(id_lst)
-        print(data_df)
-        print(type(data_df))
         data_inputs = data_df[:, :-1].copy()
         data_outputs = data_df[:, -1].copy()
-        print(data_inputs)
 
         if (type(received_data) is dict):
             if (("data" in received_data.keys()) and ("subject" in received_data.keys())):
+                response = None
                 subject = received_data["subject"]
                 print("Client's Message Subject is {subject}.".format(subject=subject))
                 self.kivy_app.label.text = "Client's Message Subject is {subject}".format(subject=subject)
@@ -192,15 +197,17 @@ class SocketThread(threading.Thread):
                 self.kivy_app.label.text = "Replying to the Client"
                 if subject == "echo":
                     if model is None:
-                        data = {"subject": "model", "data": GANN_instance}
+                        data = {"subject": "model", "data": model}
                     else:
-                        predictions = pygad.nn.predict(last_layer=model, data_inputs=data_inputs)
-                        error = numpy.sum(numpy.abs(predictions - data_outputs))
-                        # In case a client sent a model to the server despite that the model error is 0.0. In this case, no need to make changes in the model.
-                        if error == 0:
-                            data = {"subject": "done", "data": None}
-                        else:
-                            data = {"subject": "model", "data": GANN_instance}
+                        data = {"subject": "model", "data": model}
+                        # evaluation = model.evaluate(data_inputs, data_outputs)
+                        # predictions = pygad.nn.predict(last_layer=model, data_inputs=data_inputs)
+                        # error = numpy.sum(numpy.abs(predictions - data_outputs))
+                        # # In case a client sent a model to the server despite that the model error is 0.0. In this case, no need to make changes in the model.
+                        # if error == 0:
+                        #     data = {"subject": "done", "data": None}
+                        # else:
+                        #     data = {"subject": "model", "data": GANN_instance}
                     try:
                         response = pickle.dumps(data)
                     except BaseException as e:
@@ -208,54 +215,54 @@ class SocketThread(threading.Thread):
                         self.kivy_app.label.text = "Error Encoding the Message"
                 elif subject == "model":
                     try:
-                        GANN_instance = received_data["data"]
-                        best_model_idx = received_data["best_solution_idx"]
+                        other_model = received_data["data"]
+                        # best_model_idx = received_data["best_solution_idx"]
 
-                        best_model = GANN_instance.population_networks[best_model_idx]
+                        # best_model = GANN_instance.population_networks[best_model_idx]
                         if model is None:
-                            model = best_model
+                            model = other_model
                         else:
-                            predictions = pygad.nn.predict(last_layer=model, data_inputs=data_inputs)
-
-                            error = numpy.sum(numpy.abs(predictions - data_outputs))
+                            # predictions = pygad.nn.predict(last_layer=model, data_inputs=data_inputs)
+                            #
+                            # error = numpy.sum(numpy.abs(predictions - data_outputs))
     
                             # In case a client sent a model to the server despite that the model error is 0.0. In this case, no need to make changes in the model.
-                            if error == 0:
-                                data = {"subject": "done", "data": None}
-                                response = pickle.dumps(data)
-                                return
+                            # if error == 0:
+                            #     data = {"subject": "done", "data": None}
+                            #     response = pickle.dumps(data)
+                            #     return
 
-                            self.model_averaging(model, best_model)
+                            self.model_averaging(model, other_model)
 
                         # print(best_model.trained_weights)
                         # print(model.trained_weights)
 
-                        predictions = pygad.nn.predict(last_layer=model, data_inputs=data_inputs)
+                        evaluation = model.evaluate(data_inputs, data_outputs)
+                        predictions = model.predict(data_inputs)
+                        # predictions = pygad.nn.predict(last_layer=model, data_inputs=data_inputs)
                         print("Model Predictions: {predictions}".format(predictions=predictions))
 
-                        error = numpy.sum(numpy.abs(predictions - data_outputs))
-                        print("Prediction Error = {error}".format(error=error))
-                        self.kivy_app.label.text = "Prediction Error = {error}".format(error=error)
+                        # error = numpy.sum(numpy.abs(predictions - data_outputs))
+                        print("Prediction Error = {error}".format(error=evaluation[0]))
+                        self.kivy_app.label.text = "Prediction Error = {error}".format(error=evaluation[0])
 
-                        if error != 0:
-                            data = {"subject": "model", "data": GANN_instance}
+                        if evaluation[0] != 0:
+                            data = {"subject": "model", "data": model}
                             response = pickle.dumps(data)
                         else:
                             data = {"subject": "done", "data": None}
                             response = pickle.dumps(data)
-
                     except BaseException as e:
                         print("Error Decoding the Client's Data: {msg}.\n".format(msg=e))
                         self.kivy_app.label.text = "Error Decoding the Client's Data"
                 else:
                     response = pickle.dumps("Response from the Server")
-                            
+
                 try:
                     self.connection.sendall(response)
                 except BaseException as e:
                     print("Error Sending Data to the Client: {msg}.\n".format(msg=e))
                     self.kivy_app.label.text = "Error Sending Data to the Client: {msg}".format(msg=e)
-
             else:
                 print("The received dictionary from the client must have the 'subject' and 'data' keys available. The existing keys are {d_keys}.".format(d_keys=received_data.keys()))
                 self.kivy_app.label.text = "Error Parsing Received Dictionary"
@@ -310,20 +317,19 @@ class ListenThread(threading.Thread):
 
 
 df = pd.read_csv("./data/data.csv")
-print(df)
-
 data_df = df.to_numpy()
-# Preparing the NumPy array of the inputs.
-# data_inputs = numpy.array([[1, 1],
-#                            [1, 0],
-#                            [0, 1],
-#                            [0, 0]])
 
-# Preparing the NumPy array of the outputs.
-# data_outputs = numpy.array([0,
-#                             1,
-#                             1,
-#                             0])
+model = Sequential()
+model.add(Input(shape=(16,)))
+model.add(Dense(32, activation="relu"))
+model.add(Dense(16, activation="relu"))
+model.add(Dense(10, activation="relu"))
+model.add(Dense(6, activation="relu"))
+model.add(Dense(3, activation="relu"))
+model.add(Dense(1, activation="sigmoid"))
+model.compile(optimizer='adam',
+              loss='binary_crossentropy',
+              metrics=[keras.metrics.BinaryAccuracy()])
 
 server_app = ServerApp()
 server_app.title = "Server Application"

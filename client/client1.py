@@ -216,14 +216,20 @@ class RecvThread(threading.Thread):
         return received_data, 1
 
     def run(self):
-        global GANN_instance
+        global GANN_instance, data_df
 
         subject = "echo"
         GANN_instance = None
         best_sol_idx = -1
+        model = None
 
         while True:
-            data = {"subject": subject, "data": GANN_instance, "best_solution_idx": best_sol_idx}
+            id_lst = list(range(data_df.shape[0]))
+            random.shuffle(id_lst)
+            data_inputs = data_df[id_lst[:1000], :-1].copy()
+            data_outputs = data_df[id_lst[:1000], -1].copy()
+
+            data = {"subject": subject, "data": model, "best_solution_idx": best_sol_idx}
             data_byte = pickle.dumps(data)
 
             self.kivy_app.label.text = "Sending a Message of Type {subject} to the Server".format(subject=subject)
@@ -244,7 +250,7 @@ class RecvThread(threading.Thread):
 
             subject = received_data["subject"]
             if subject == "model":
-                GANN_instance = received_data["data"]
+                model = received_data["data"]
             elif subject == "done":
                 self.kivy_app.label.text = "Model is Trained"
                 break
@@ -252,12 +258,14 @@ class RecvThread(threading.Thread):
                 self.kivy_app.label.text = "Unrecognized Message Type: {subject}".format(subject=subject)
                 break
 
-            ga_instance = prepare_GA(GANN_instance)
+            # ga_instance = prepare_GA(GANN_instance)
+            #
+            # ga_instance.run()
 
-            ga_instance.run()
+            model.fit(data_inputs, data_outputs, epochs=20, batch_size=128)
 
             subject = "model"
-            best_sol_idx = ga_instance.best_solution()[2]
+            # best_sol_idx = ga_instance.best_solution()[2]
 
 
 df = pd.read_csv("./data/data.csv")
